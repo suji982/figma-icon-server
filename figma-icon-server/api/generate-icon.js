@@ -87,21 +87,6 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  // ── 임시 디버그용 엔드포인트 ──────────────────────────────────────
-  // GET으로 접속하면 서버가 실제로 읽고 있는 GEMINI_API_KEY의 상태를 알려줍니다.
-  // 키 값 자체는 절대 노출하지 않고, 길이/시작 문자 몇 개만 보여줍니다.
-  // 문제 해결 후 반드시 이 블록은 지워주세요 (보안상 디버그 엔드포인트를 남겨두면 안 됩니다).
-  if (req.method === "GET") {
-    const key = process.env.GEMINI_API_KEY;
-    return res.status(200).json({
-      keyExists: typeof key === "string" && key.length > 0,
-      keyLength: key ? key.length : 0,
-      keyPrefix: key ? key.slice(0, 6) : null,
-      keyHasWhitespace: key ? /\s/.test(key) : null,
-    });
-  }
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST 요청만 허용됩니다." });
   }
