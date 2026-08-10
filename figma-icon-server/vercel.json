@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/generate-icon.js": {
+      "maxDuration": 30,
+      "includeFiles": "assets/*"
+    }
+  }
+}

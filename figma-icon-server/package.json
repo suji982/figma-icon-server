@@ -1,0 +1,11 @@
+{
+  "name": "figma-icon-generator-server",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
