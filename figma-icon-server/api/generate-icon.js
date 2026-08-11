@@ -67,6 +67,16 @@ A single 3D clay-render icon of {SUBJECT}, matching the exact material, color pa
 proportions, and lighting style of the attached reference images (rounded chibi-like proportions,
 soft matte-to-glossy plastic/clay material with subtle specular highlights, toy-like confident
 colors, soft even studio lighting from the upper-left, same slight 3/4 front elevated camera angle).
+SIMPLICITY (important): keep visual complexity low. Favor large, simple, clean shapes over
+intricate surface detail. For subjects with naturally repeated small parts (gears, dials, keyboards,
+grilles, teeth, buttons, vents, etc.), drastically reduce the repeat count and enlarge each remaining
+part so the silhouette stays simple and instantly readable at a small size, rather than rendering
+every mechanical detail realistically. Avoid fine texture, small engravings, or busy surface patterns.
+IMPORTANT for iconic/symbolic subjects (warning signs, checkmarks, arrows, stars, hearts, and other
+emoji-like or symbol-like shapes): do NOT default to a flat 2D emoji or flat vector icon illustration.
+Even these symbolic shapes must be rendered as chunky, thick, physically-extruded 3D clay objects
+with rounded bevel edges and soft plastic sheen, exactly like the attached reference images — treat
+the symbol as a solid toy-like object with real depth and volume, never as a flat printed icon.
 BACKGROUND: the entire background must be a single solid flat plain white (#FFFFFF), with no
 gradient, no texture, no scene, no floor plane, no shadow cast onto the background itself.
 Centered composition, single self-contained object/scene, small readable text/labels are allowed
