@@ -3,6 +3,10 @@
     "api/generate-icon.js": {
       "maxDuration": 30,
       "includeFiles": "assets/*"
+    },
+    "api/generate-sticker.js": {
+      "maxDuration": 30,
+      "includeFiles": "assets/*"
     }
   }
 }
