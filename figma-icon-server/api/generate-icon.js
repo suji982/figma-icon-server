@@ -22,7 +22,7 @@ const fs = require("fs");
 const path = require("path");
 const { PNG } = require("pngjs");
 
-const GEMINI_MODEL = "gemini-2.5-flash-image"; // = 나노바나나 (무료 티어 있음, Pro 아님)
+const GEMINI_MODEL = "gemini-3.1-flash-image";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
 const BACKGROUND_HEX = "#FFFFFF";
