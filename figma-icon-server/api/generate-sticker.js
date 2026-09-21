@@ -5,6 +5,11 @@
 // 기존 figma-icon-server 저장소의 api/ 폴더에 이 파일만 추가하면 됩니다.
 // (같은 Vercel 프로젝트·같은 GEMINI_API_KEY·같은 도메인을 그대로 씀)
 //
+// 역할 분담 (v2)
+//   서버/모델: 외곽선·흰 테두리 없는 "플랫한 색 면" 일러스트만 키 컬러 배경 위에 생성
+//   플러그인:  배경 제거 → 실루엣을 따라 외곽선 + 흰 칼선 테두리를 직접 그림
+//   → 모델이 선 두께·위치를 못 지키는 문제를 원천 차단. 외곽선 색/두께는 서버와 무관.
+//
 // 3D 아이콘과 다른 점
 // 1) 사용자가 고른 색상(1~4개)을 받아서 팔레트로 강제합니다.
 //    - 모델은 hex 코드를 잘 못 알아듣기 때문에 hex + 가장 가까운 색 이름을 같이 넣고,
@@ -22,7 +27,6 @@ const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
 const MAX_COLORS = 4;
-const DEFAULT_OUTLINE = "#252C46"; // 레퍼런스에서 샘플링한 남색
 
 // ── 색상 유틸 ─────────────────────────────────────────────────────
 const HEX_RE = /^#[0-9a-f]{6}$/i;
@@ -66,8 +70,9 @@ const KEY_CANDIDATES = [
   ["pure blue", "#0000FF"],
 ];
 
-function pickKeyColor(colors, outline) {
-  const avoid = colors.concat([outline]).map(hexToRgb).concat([[255, 255, 255]]);
+function pickKeyColor(colors) {
+  // 흰색·검정 계열도 피함 (모델이 팔레트 밖으로 흰 하이라이트나 어두운 그림자를 쓸 수 있어서)
+  const avoid = colors.map(hexToRgb).concat([[255, 255, 255], [30, 30, 40]]);
   let best = KEY_CANDIDATES[0];
   let bestScore = -1;
   for (const cand of KEY_CANDIDATES) {
@@ -134,50 +139,45 @@ function loadStickerAnchors(keyHex) {
 }
 
 // ── 프롬프트 ─────────────────────────────────────────────────────
-function buildPrompt({ subject, extraDetail, colors, outline, key, hasAnchors }) {
+function buildPrompt({ subject, extraDetail, colors, key, hasAnchors }) {
   const palette = colors.length
     ? colors.map((c) => `${colorName(c)} (${c.toUpperCase()})`).join(", ")
     : null;
 
-  const outlineDesc = `${colorName(outline)} (${outline.toUpperCase()})`;
-
   const lines = [
-    `A single die-cut vinyl sticker of ${subject}.`,
+    `A flat, minimal vector illustration of ${subject}, made only of solid color shapes.`,
 
-    `STYLE: bold, playful flat vector sticker illustration. Very thick, uniform ${outlineDesc}
-outline around every shape and around the whole silhouette, with rounded line joins.
-Chunky, simplified, slightly exaggerated shapes with rounded corners. Flat solid fills only;
-shading is done with at most one flat, hard-edged secondary shape per area (a lighter or darker
-tint of the same color, e.g. a wavy split or a diagonal band), never with gradients. Tiny details
-such as eyes or highlights are small simple dots or short strokes. No 3D, no photorealism,
-no gradients, no texture, no drop shadow. The silhouette must stay simple and readable at small
-size; for subjects with many repeated small parts, drastically reduce their number.`,
+    `NO LINES AT ALL (most important): no outlines, no strokes, no contour lines, no dark edges,
+no line art, no dividing lines between parts — not around the silhouette and not inside it.
+Parts are separated only by flat color changes. No white border or sticker border either
+(it is added later in post-production). The shapes touch the background directly.`,
+
+    `SIMPLICITY (very important): reduce the subject to its 3 to 5 most essential, large, chunky
+shapes with rounded corners, simpler than an emoji. Merge similar or thin layers into one.
+Leave out small details entirely: no seeds, dots, stitches, textures, patterns, sparkles,
+tiny highlights, or small parts. One compact, solid silhouette. Shading, if any, is at most one
+large, hard-edged lighter or darker tint shape per area — never gradients. No 3D, no
+photorealism, no drop shadow.`,
 
     hasAnchors
-      ? `The attached style reference sheet shows several example stickers. Match their drawing
-style exactly: outline thickness, shape simplification, flat two-tone shading, and the
-white die-cut border. Do NOT copy their subjects, characters, faces, or colors (including their outline color —
-use the outline color specified above), and do not draw
-more than one sticker — create ONE new sticker of the requested subject in that style.`
+      ? `The attached style reference sheet shows example illustrations in exactly this style:
+bold, chunky flat color shapes, simple two-tone shading, no lines anywhere. Match that level of
+simplicity and that shading approach. Do NOT copy their subjects, characters, faces, or colors,
+and draw only ONE illustration of the requested subject.`
       : null,
 
     palette
-      ? `COLOR PALETTE (strict): build the illustration from these colors: ${palette}.
-The attached palette swatch image shows the exact colors. Slightly lighter or darker tints of
-these colors are allowed for the two-tone shading. Do not introduce other hues, except the ${outlineDesc}
-outline and small white highlights.`
-      : `COLOR PALETTE: a small, harmonious palette of 3-4 cheerful colors.`,
+      ? `COLOR PALETTE (strict): use only these colors: ${palette}, plus slightly lighter or darker
+tints of them for the two-tone shading. The attached palette swatch image shows the exact
+colors. Do not introduce other hues.`
+      : `COLOR PALETTE: a small, harmonious palette of 3-4 cheerful, saturated colors.`,
 
-    `STICKER BORDER: surround the entire illustration with one thick, continuous, solid pure white
-(#FFFFFF) die-cut border of even width (about 4% of the image width), following the outer
-silhouette with smooth rounded contours. The border must be fully closed with no gaps.`,
+    `BACKGROUND: the entire background is one flat, uniform ${key.name} (${key.hex}) color. No
+gradient, no texture, no shadow, no scene, no floor. Never use this ${key.name} color or anything
+close to it inside the illustration.`,
 
-    `BACKGROUND: everything outside the white border is one flat, uniform ${key.name} (${key.hex})
-color. No gradient, no texture, no shadow, no drop shadow under the sticker, no scene.
-Never use this ${key.name} color anywhere inside the sticker.`,
-
-    `COMPOSITION: exactly one sticker, centered, filling about 80% of the frame with background
-visible on all four sides. No text or lettering unless explicitly requested below.`,
+    `COMPOSITION: exactly one subject, centered, filling about 70% of the frame, with plenty of
+background visible on all four sides. No text or lettering unless explicitly requested below.`,
 
     extraDetail ? `Additional detail: ${extraDetail}` : null,
   ];
@@ -200,8 +200,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { subject, extraDetail, colors: rawColors, outlineColor, referenceImageBase64 } =
-      req.body || {};
+    const { subject, extraDetail, colors: rawColors, referenceImageBase64 } = req.body || {};
 
     if (!subject || typeof subject !== "string") {
       return res.status(400).json({ error: "subject(사물 이름, 예: 'cat')가 필요합니다." });
@@ -211,15 +210,13 @@ module.exports = async function handler(req, res) {
       ? rawColors.filter((c) => typeof c === "string" && HEX_RE.test(c)).slice(0, MAX_COLORS)
       : [];
 
-    const outline =
-      typeof outlineColor === "string" && HEX_RE.test(outlineColor) ? outlineColor : DEFAULT_OUTLINE;
-    const key = pickKeyColor(colors, outline);
+    const key = pickKeyColor(colors);
     const anchors = referenceImageBase64
       ? [{ mimeType: "image/png", data: referenceImageBase64 }]
       : loadStickerAnchors(key.hex);
 
     const parts = [
-      { text: buildPrompt({ subject, extraDetail, colors, outline, key, hasAnchors: anchors.length > 0 }) },
+      { text: buildPrompt({ subject, extraDetail, colors, key, hasAnchors: anchors.length > 0 }) },
     ];
 
     if (anchors.length) {
@@ -256,9 +253,8 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       subject,
       colors,
-      outlineColor: outline,
       mimeType: imagePart.inlineData.mimeType,
-      imageBase64: imagePart.inlineData.data, // 키 컬러 배경 상태 — 투명 처리는 플러그인 UI에서
+      imageBase64: imagePart.inlineData.data, // 키 컬러 배경 + 선 없는 일러스트 — 외곽선·테두리는 플러그인에서
       keyColor: key.hex,
     });
   } catch (err) {
