@@ -11,7 +11,7 @@
 //   → 모델이 선 두께·위치를 못 지키는 문제를 원천 차단. 외곽선 색/두께는 서버와 무관.
 //
 // 3D 아이콘과 다른 점
-// 1) 사용자가 고른 색상(1~4개)을 받아서 팔레트로 강제합니다.
+// 1) 사용자가 고른 색상(1~6개)을 받아서 팔레트로 강제합니다.
 //    - 모델은 hex 코드를 잘 못 알아듣기 때문에 hex + 가장 가까운 색 이름을 같이 넣고,
 //    - 팔레트 색상칩 이미지를 만들어서 참조 이미지로 함께 첨부합니다.
 // 2) 배경을 흰색이 아니라 "키 컬러"(형광 그린/마젠타 등)로 생성합니다.
@@ -26,7 +26,7 @@ const { PNG } = require("pngjs");
 const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
-const MAX_COLORS = 4;
+const MAX_COLORS = 6;
 
 // ── 색상 유틸 ─────────────────────────────────────────────────────
 const HEX_RE = /^#[0-9a-f]{6}$/i;
@@ -68,6 +68,8 @@ const KEY_CANDIDATES = [
   ["magenta", "#FF00FF"],
   ["cyan", "#00FFFF"],
   ["pure blue", "#0000FF"],
+  ["chartreuse", "#80FF00"],
+  ["orange-red", "#FF4000"],
 ];
 
 function pickKeyColor(colors) {
