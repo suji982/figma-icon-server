@@ -25,6 +25,12 @@ const { PNG } = require("pngjs");
 const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
+
+// 사물별 "시그니처 디테일" 계획을 먼저 텍스트 모델에게 물어봄 (우육면 → 굵은 면, 소고기, 큰 파 3~4개)
+// 실패하거나 느리면 계획 없이 그냥 진행
+const PLAN_MODEL = "gemini-2.5-flash";
+const PLAN_URL = `https://generativelanguage.googleapis.com/v1beta/models/${PLAN_MODEL}:generateContent`;
+const PLAN_TIMEOUT_MS = 7000;
 const MAX_COLORS = 6;
 
 // ── 색상 유틸 ─────────────────────────────────────────────────────
@@ -168,9 +174,23 @@ const SHAPE_BUDGET = [
 
 const COLOR_BUDGET = [9, 7, 5, 4];
 
+// 시그니처 디테일 최소 크기 (물체 폭 대비 %) / 반복 개수 상한 — Simplify 단계별
+const DETAIL_BUDGET = [
+  { stroke: 2.5, piece: 5, count: "5 to 8" },
+  { stroke: 3, piece: 6, count: "4 to 6" },
+  { stroke: 4, piece: 8, count: "3 to 5" },
+  { stroke: 6, piece: 11, count: "2 to 4" },
+];
+
 const ROLE = ["MAIN color — covers most of the object", "SECONDARY color", "ACCENT color — small parts only"];
 
-function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2, seenBackground }) {
+function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2, seenBackground, plan }) {
+  const D = DETAIL_BUDGET[simplify] || DETAIL_BUDGET[2];
+  const PLAN_LINE = plan
+    ? `SUBJECT PLAN for "${subject}"${plan.subject_en ? ` (${plan.subject_en})` : ""}: keep these signature details, drawn chunky: ` +
+      plan.signature.map((x) => `${x.part} — ${x.how}`).join("; ") +
+      (plan.drop.length ? `. Leave out: ${plan.drop.join(", ")}.` : ".")
+    : null;
   const paletteLines = ramps.map((r, i) =>
     `Color ${i + 1} (${colorName(r.base)}, ${ROLE[Math.min(i, 2)]}): ` +
     `base ${r.base}, shadow ${r.shadow}`
@@ -205,16 +225,19 @@ Every corner and every tip is generously rounded, like a soft vinyl toy or a cut
 Chubby, compact proportions; thick parts; nothing thin, spiky or fiddly. No 3D rendering,
 no photorealism, no drop shadow, no cast shadow on the ground.`,
 
-    `NO SMALL MARKS: nothing scattered inside shapes — no individual grains, seeds, dots, specks,
-crumbs, stitches, cracks, patterns, sparkles or tiny parts. Rice is ONE solid white shape (not grains),
-cheese is one shape, a pizza has at most 3 big round toppings. If a material has a texture, suggest it
-only with a few big, soft bumps on that part's edge (${simplify >= 3 ? "or leave it perfectly smooth" : "3 to 6 bumps at most"}).`,
+    `DETAIL RULE — KEEP THE SIGNATURE, MAKE IT CHUNKY (very important):
+1) Signature details are the few things that make this subject instantly recognizable
+(beef noodle soup: noodles, beef chunks, green onion; dumpling: its pleats; bubble tea: pearls and straw;
+lipstick: the colored bullet). Keep them — never drop a signature detail.
+2) Draw every signature detail BIG, THICK, FEW and SIMPLE: each strand or line at least ${D.stroke}% of the
+object's width thick (noodles are a few fat, rounded wavy bands, not thin lines); each small piece at least
+${D.piece}% of the object's width across; repeated items limited to ${D.count} pieces (e.g. ${D.count} big simple
+green onion pieces, not many tiny rings with holes). Exaggerate size rather than add count.
+3) Everything that is not a signature detail is left out: no grains, seeds, dots, specks, crumbs, stitches,
+cracks, patterns, sparkles, holes inside small pieces, or thin decorative lines. Rice is one solid white
+shape; a texture is suggested only by a few big soft bumps on an edge.`,
 
-    `SIMPLIFY THE DRAWING, NOT THE OBJECT (very important): keep every part that makes the subject
-recognizable, and simplify how each part is drawn. A viewer must identify the subject instantly.
-Examples: a lipstick keeps its colored bullet, the tube and the base; an open cushion compact keeps
-the lid with its mirror, the base and the puff; sushi keeps the fish slice on top of the rice block;
-a bubble tea keeps its pearls. Drop decoration, never the defining parts.`,
+    PLAN_LINE,
 
     `ALL PARTS CONNECTED: parts touch or overlap each other directly. Never leave background-colored
 gaps or slits between parts. Mirrors, glass and glossy surfaces are painted in light gray or light
@@ -254,6 +277,57 @@ background visible on all four sides. No text or lettering unless explicitly req
     .join("\n\n");
 }
 
+// ── 시그니처 디테일 계획 ─────────────────────────────────────────
+async function planDetails(subject, extraDetail, simplify) {
+  const D = DETAIL_BUDGET[simplify] || DETAIL_BUDGET[2];
+  const ask = [
+    `You plan cute, chunky flat sticker illustrations. Subject: "${subject}" (may be written in any language).`,
+    extraDetail ? `User note: ${extraDetail}` : "",
+    `List the 1 to 3 signature details that make this subject instantly recognizable as a small sticker,`,
+    `and for each, say how to draw it as a BIG, THICK, SIMPLE shape: give a count (${D.count} at most for repeated items)`,
+    `and a simple form (e.g. "noodles: 3-4 fat rounded wavy bands", "green onion: 3-4 large plain green pieces, no holes").`,
+    `Also list up to 5 fussy details a typical illustration would add that should be left out.`,
+    `Answer in English JSON: {"subject_en": string, "signature": [{"part": string, "how": string}], "drop": [string]}.`,
+  ].filter(Boolean).join(" ");
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PLAN_TIMEOUT_MS);
+  try {
+    const r = await fetch(PLAN_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: ask }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.3,
+          maxOutputTokens: 400,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+    const j = JSON.parse(text.replace(/```json|```/g, "").trim());
+    const clean = (v, n) => String(v || "").replace(/\s+/g, " ").slice(0, n);
+    const signature = Array.isArray(j.signature)
+      ? j.signature.slice(0, 3).map((x) => ({ part: clean(x.part, 40), how: clean(x.how, 140) })).filter((x) => x.part && x.how)
+      : [];
+    if (!signature.length) return null;
+    return {
+      subject_en: clean(j.subject_en, 60),
+      signature,
+      drop: Array.isArray(j.drop) ? j.drop.slice(0, 5).map((d) => clean(d, 50)).filter(Boolean) : [],
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── 핸들러 ───────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -287,8 +361,10 @@ module.exports = async function handler(req, res) {
       ? [{ mimeType: "image/png", data: referenceImageBase64 }]
       : loadStickerAnchors(key.hex);
 
+    const plan = await planDetails(subject, extraDetail, simplify);
+
     const parts = [
-      { text: buildPrompt({ subject, extraDetail, ramps, key, anchorCount: anchors.length, simplify, seenBackground }) },
+      { text: buildPrompt({ plan, subject, extraDetail, ramps, key, anchorCount: anchors.length, simplify, seenBackground }) },
     ];
 
     // 앵커는 한 장씩 따로, "예시 n — 객체 하나" 라벨과 함께
@@ -336,6 +412,7 @@ module.exports = async function handler(req, res) {
       mimeType: imagePart.inlineData.mimeType,
       imageBase64: imagePart.inlineData.data,
       keyColor: key.hex,
+      plan,             // 디버그용: 어떤 시그니처 디테일로 그리라고 했는지
     });
   } catch (err) {
     return res.status(500).json({ error: "서버 오류", detail: String(err) });
