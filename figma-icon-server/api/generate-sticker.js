@@ -153,9 +153,17 @@ function loadStickerAnchors(keyHex) {
 }
 
 // ── 프롬프트 ─────────────────────────────────────────────────────
+// 단순화 단계별 "형태 예산" (플러그인 Simplify 슬라이더와 연동)
+const SHAPE_BUDGET = [
+  "Reduce the subject to about 5 to 7 large shapes.",
+  "Reduce the subject to about 4 to 6 large shapes.",
+  "Reduce the subject to about 3 to 5 large, chunky shapes — simpler than an emoji.",
+  "Reduce the subject to just 2 to 4 big, blobby shapes — as simple as a children's picture-book icon.",
+];
+
 const ROLE = ["MAIN color — covers most of the object", "SECONDARY color", "ACCENT color — small parts only"];
 
-function buildPrompt({ subject, extraDetail, ramps, key, anchorCount }) {
+function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2 }) {
   const paletteLines = ramps.map((r, i) =>
     `Color ${i + 1} (${colorName(r.base)}, ${ROLE[Math.min(i, 2)]}): ` +
     `light face ${r.light}, base ${r.base}, shadow face ${r.shadow}`
@@ -169,7 +177,7 @@ Not a set, not a pair, not a group, not a pattern, no copies, no variations side
 no extra props or background objects. If the subject name could mean several items, draw just one.
 The whole illustration is one connected silhouette.`,
 
-    `NO LINES AT ALL: no outlines, no strokes, no contour lines, no dark edges, no line art,
+    `NO LINES AT ALL: no outlines of any color (not dark, not colored, not white), no strokes, no rims drawn as lines, no contour lines, no dark edges, no line art,
 no dividing lines between parts — not around the silhouette and not inside it.
 Parts are separated only by flat color changes. No white border or sticker border
 (it is added later). The shapes touch the background directly.`,
@@ -181,24 +189,25 @@ Surfaces facing the viewer use the BASE tone.
 Surfaces facing down or toward the right use the SHADOW tone.
 Shading is flat, hard-edged shapes following the object's form (like a cube's three faces,
 or a crescent on the lower-right of a round shape) — never gradients, never random blobs,
-never decorative patches that ignore the form. Every part of the object is lit from the same side.`,
+never decorative patches that ignore the form. Every part of the object is lit from the same side. Keep it to one or two shade shapes per part;
+use the LIGHT tone sparingly (big top planes or one soft highlight), not on every little piece.`,
 
-    `SIMPLICITY: reduce the subject to its 3 to 6 most essential, large, chunky shapes with rounded
-corners, simpler than an emoji. No scattered small details inside shapes: no dots, specks, stitches,
-fine patterns, sparkles or tiny parts. No 3D rendering, no photorealism, no drop shadow, no cast shadow on the ground.`,
+    `STYLE — CHUNKY, ROUND AND SOFT (most important after single object): ${SHAPE_BUDGET[simplify]}
+Every corner and every tip is generously rounded, like a soft vinyl toy or a cute puffy sticker.
+Chubby, compact proportions; thick parts; nothing thin, spiky or fiddly. No 3D rendering,
+no photorealism, no drop shadow, no cast shadow on the ground.`,
 
-    `MATERIAL TEXTURE THROUGH CONTOUR (important): when the material has a characteristic texture,
-show it ONLY through the outline shape of that part, never through small marks inside it.
-Examples: rice = a bumpy, lumpy edge along the rice shape; whipped cream = a few big rounded
-swirl lobes with one flat tone shape per lobe; lettuce = a wavy, ruffled edge; melted cheese = one
-drip shape; fur = a few chunky tufts on the silhouette edge. Keep these edge bumps large and few,
-so the shape still reads clearly at small sizes.`,
+    `NO SMALL MARKS: nothing scattered inside shapes — no individual grains, seeds, dots, specks,
+crumbs, stitches, cracks, patterns, sparkles or tiny parts. Rice is ONE solid white shape (not grains),
+cheese is one shape, a pizza has at most 3 big round toppings. If a material has a texture, suggest it
+only with a few big, soft bumps on that part's edge (${simplify >= 3 ? "or leave it perfectly smooth" : "3 to 6 bumps at most"}).`,
+
+    `NO TEXT: never write letters, words, numbers, labels or the subject's name on the object, in any language.`,
 
     anchorCount
       ? `The ${anchorCount} attached style examples each show ONE illustration in exactly this style and
-lighting logic (top-left light, three flat tones per color, no lines, texture shown only through
-contour shapes like the rice edge or the cream swirls). Match their simplicity, shading logic and
-contour-based texture. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
+lighting logic (top-left light, flat tones, no lines). Match their shading logic, but make your
+illustration at least as simple and as rounded as the simplest example. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
       : null,
 
     ramps.length
@@ -237,7 +246,8 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { subject, extraDetail, colors: rawColors, referenceImageBase64 } = req.body || {};
+    const { subject, extraDetail, colors: rawColors, referenceImageBase64, simplify: rawSimplify } = req.body || {};
+    const simplify = [0, 1, 2, 3].includes(rawSimplify) ? rawSimplify : 2;
 
     if (!subject || typeof subject !== "string") {
       return res.status(400).json({ error: "subject(사물 이름, 예: 'cat')가 필요합니다." });
@@ -255,7 +265,7 @@ module.exports = async function handler(req, res) {
       : loadStickerAnchors(key.hex);
 
     const parts = [
-      { text: buildPrompt({ subject, extraDetail, ramps, key, anchorCount: anchors.length }) },
+      { text: buildPrompt({ subject, extraDetail, ramps, key, anchorCount: anchors.length, simplify }) },
     ];
 
     // 앵커는 한 장씩 따로, "예시 n — 객체 하나" 라벨과 함께
