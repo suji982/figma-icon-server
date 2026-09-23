@@ -155,10 +155,10 @@ function loadStickerAnchors(keyHex) {
 // ── 프롬프트 ─────────────────────────────────────────────────────
 // 단순화 단계별 "형태 예산" (플러그인 Simplify 슬라이더와 연동)
 const SHAPE_BUDGET = [
-  "Reduce the subject to about 5 to 7 large shapes.",
-  "Reduce the subject to about 4 to 6 large shapes.",
-  "Reduce the subject to about 3 to 5 large, chunky shapes — simpler than an emoji.",
-  "Reduce the subject to just 2 to 4 big, blobby shapes — as simple as a children's picture-book icon.",
+  "Use about 6 to 9 large shapes.",
+  "Use about 5 to 8 large shapes.",
+  "Use about 4 to 7 large, chunky shapes.",
+  "Use about 3 to 5 big, blobby shapes.",
 ];
 
 const ROLE = ["MAIN color — covers most of the object", "SECONDARY color", "ACCENT color — small parts only"];
@@ -201,6 +201,16 @@ no photorealism, no drop shadow, no cast shadow on the ground.`,
 crumbs, stitches, cracks, patterns, sparkles or tiny parts. Rice is ONE solid white shape (not grains),
 cheese is one shape, a pizza has at most 3 big round toppings. If a material has a texture, suggest it
 only with a few big, soft bumps on that part's edge (${simplify >= 3 ? "or leave it perfectly smooth" : "3 to 6 bumps at most"}).`,
+
+    `SIMPLIFY THE DRAWING, NOT THE OBJECT (very important): keep every part that makes the subject
+recognizable, and simplify how each part is drawn. A viewer must identify the subject instantly.
+Examples: a lipstick keeps its colored bullet, the tube and the base; an open cushion compact keeps
+the lid with its mirror, the base and the puff; sushi keeps the fish slice on top of the rice block;
+a bubble tea keeps its pearls. Drop decoration, never the defining parts.`,
+
+    `ALL PARTS CONNECTED: parts touch or overlap each other directly. Never leave background-colored
+gaps or slits between parts. Mirrors, glass and glossy surfaces are painted in light gray or light
+tints of the palette — never in the background color.`,
 
     `NO TEXT: never write letters, words, numbers, labels or the subject's name on the object, in any language.`,
 
