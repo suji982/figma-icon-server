@@ -83,11 +83,19 @@ const KEY_CANDIDATES = [
   ["orange-red", "#FF4000"],
 ];
 
-function pickKeyColor(paletteHexes) {
+// avoidHex: 재시도일 때 지난번 키 컬러 (모델이 그 색을 제대로 안 칠했으니 다른 색으로)
+function pickKeyColor(paletteHexes, avoidHex) {
+  const cands = KEY_CANDIDATES.filter((c) => !avoidHex || c[1].toLowerCase() !== String(avoidHex).toLowerCase());
+  // 색을 안 골랐으면 모델이 색을 정하니까, 물체에 가장 드문 초록 크로마키를 기본으로
+  // (예전엔 흰색·검정만 피해서 마젠타가 골라졌는데, 빨강·핑크 물체(홍등, 립스틱)와 겹쳤음)
+  if (!paletteHexes.length) {
+    const c = cands.find((k) => k[0] === "bright green") || cands[0];
+    return { name: c[0], hex: c[1] };
+  }
   const avoid = paletteHexes.map(hexToRgb).concat([[255, 255, 255], [30, 30, 40]]);
-  let best = KEY_CANDIDATES[0];
+  let best = cands[0];
   let bestScore = -1;
-  for (const cand of KEY_CANDIDATES) {
+  for (const cand of cands) {
     const rgb = hexToRgb(cand[1]);
     const score = Math.min(...avoid.map((a) => dist(a, rgb)));
     if (score > bestScore) {
@@ -163,7 +171,7 @@ const SHAPE_BUDGET = [
 
 const ROLE = ["MAIN color — covers most of the object", "SECONDARY color", "ACCENT color — small parts only"];
 
-function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2 }) {
+function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2, seenBackground }) {
   const paletteLines = ramps.map((r, i) =>
     `Color ${i + 1} (${colorName(r.base)}, ${ROLE[Math.min(i, 2)]}): ` +
     `light face ${r.light}, base ${r.base}, shadow face ${r.shadow}`
@@ -229,8 +237,11 @@ No other hues. Small dark details (like eyes) may use the darkest shadow tone.`
       : `COLOR PALETTE: a small, harmonious palette of 2-3 cheerful, saturated colors, each used as a
 3-tone ramp (light face / base / shadow face).`,
 
-    `BACKGROUND: the entire background is one flat, uniform ${key.name} (${key.hex}). No gradient,
-no texture, no shadow, no scene, no floor. Never use ${key.name} or anything close to it inside the illustration.`,
+    `BACKGROUND (critical for cut-out): a pure ${key.name} chroma-key screen, exactly ${key.hex},
+like a video green screen — perfectly flat and saturated edge to edge. Do NOT tint, darken, desaturate
+or shift the background toward the object's colors, no gradient, no vignette, no texture, no shadow,
+no scene, no floor. Never use ${key.name} or anything close to it inside the illustration.
+${seenBackground ? `(Last attempt the background came out as ${seenBackground}, which was wrong and too close to the object's colors — this time use exactly ${key.hex}.)` : ""}`,
 
     `COMPOSITION: the single ${subject} is centered, filling about 65% of the frame, with plenty of
 background visible on all four sides. No text or lettering unless explicitly requested below.`,
@@ -256,7 +267,10 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { subject, extraDetail, colors: rawColors, referenceImageBase64, simplify: rawSimplify } = req.body || {};
+    const { subject, extraDetail, colors: rawColors, referenceImageBase64, simplify: rawSimplify, avoidKey, seenBackground: rawSeen, objectColors: rawObj } = req.body || {};
+    // 재시도 시 플러그인이 실제 물체에서 뽑은 색 — 키 컬러를 이것들과 멀리 고르는 데만 씀
+    const objectColors = Array.isArray(rawObj) ? rawObj.filter((c) => typeof c === "string" && HEX_RE.test(c)).slice(0, 8) : [];
+    const seenBackground = typeof rawSeen === "string" && HEX_RE.test(rawSeen) ? rawSeen.toUpperCase() : null;
     const simplify = [0, 1, 2, 3].includes(rawSimplify) ? rawSimplify : 2;
 
     if (!subject || typeof subject !== "string") {
@@ -269,13 +283,13 @@ module.exports = async function handler(req, res) {
     const ramps = colors.map(makeRamp);
     const palette = ramps.flatMap((r) => [r.light, r.base, r.shadow]);
 
-    const key = pickKeyColor(palette);
+    const key = pickKeyColor(palette.concat(objectColors), typeof avoidKey === "string" ? avoidKey : null);
     const anchors = referenceImageBase64
       ? [{ mimeType: "image/png", data: referenceImageBase64 }]
       : loadStickerAnchors(key.hex);
 
     const parts = [
-      { text: buildPrompt({ subject, extraDetail, ramps, key, anchorCount: anchors.length, simplify }) },
+      { text: buildPrompt({ subject, extraDetail, ramps, key, anchorCount: anchors.length, simplify, seenBackground }) },
     ];
 
     // 앵커는 한 장씩 따로, "예시 n — 객체 하나" 라벨과 함께
