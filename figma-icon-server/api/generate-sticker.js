@@ -41,17 +41,14 @@ function dist(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
-// 한 색 → [밝은 면, 기본, 그림자 면]
-// 그림자: 약간 푸른 기가 도는 multiply / 밝은 면: 약간 따뜻한 screen
-// (HSL로 계산하면 크림·파스텔 계열 그림자가 형광 살구색처럼 튀어서 RGB 혼합 방식으로)
-const SHADE_MUL = [0.78, 0.76, 0.86];
-const LIGHT_MIX = [0.32, 0.30, 0.24];
+// 한 색 → [기본, 그림자] 2톤
+// (3톤이던 때 모델이 톤마다 면을 쪼개고 테두리 링·베벨까지 그려서 복잡해졌음 → 2톤으로 제한)
+const SHADE_MUL = [0.8, 0.78, 0.87];
 
 function makeRamp(hex) {
   const rgb = hexToRgb(hex);
   const shadow = rgb.map((v, i) => v * SHADE_MUL[i]);
-  const light = rgb.map((v, i) => v + (255 - v) * LIGHT_MIX[i]);
-  return { light: rgbToHex(light), base: hex.toUpperCase(), shadow: rgbToHex(shadow) };
+  return { base: hex.toUpperCase(), shadow: rgbToHex(shadow) };
 }
 
 const NAMED_COLORS = [
@@ -106,16 +103,16 @@ function pickKeyColor(paletteHexes, avoidHex) {
   return { name: best[0], hex: best[1] };
 }
 
-// 팔레트 칩: 색마다 세로 3칸 [밝은 면 / 기본 / 그림자 면], 1번 색이 가장 넓게
+// 팔레트 칩: 색마다 세로 2칸 [기본 / 그림자], 1번 색이 가장 넓게
 function makeRampSwatch(ramps) {
   const cellH = 96;
   const widths = ramps.map((_, i) => (i === 0 ? 192 : 128));
   const W = widths.reduce((a, b) => a + b, 0);
-  const png = new PNG({ width: W, height: cellH * 3 });
+  const png = new PNG({ width: W, height: cellH * 2 });
   let x0 = 0;
   ramps.forEach((ramp, i) => {
-    const rows = [ramp.light, ramp.base, ramp.shadow].map(hexToRgb);
-    for (let y = 0; y < cellH * 3; y++) {
+    const rows = [ramp.base, ramp.shadow].map(hexToRgb);
+    for (let y = 0; y < cellH * 2; y++) {
       const [r, g, b] = rows[Math.floor(y / cellH)];
       for (let x = x0; x < x0 + widths[i]; x++) {
         const o = (y * W + x) * 4;
@@ -169,12 +166,14 @@ const SHAPE_BUDGET = [
   "Use about 3 to 5 big, blobby shapes.",
 ];
 
+const COLOR_BUDGET = [9, 7, 5, 4];
+
 const ROLE = ["MAIN color — covers most of the object", "SECONDARY color", "ACCENT color — small parts only"];
 
 function buildPrompt({ subject, extraDetail, ramps, key, anchorCount, simplify = 2, seenBackground }) {
   const paletteLines = ramps.map((r, i) =>
     `Color ${i + 1} (${colorName(r.base)}, ${ROLE[Math.min(i, 2)]}): ` +
-    `light face ${r.light}, base ${r.base}, shadow face ${r.shadow}`
+    `base ${r.base}, shadow ${r.shadow}`
   );
 
   const lines = [
@@ -190,15 +189,16 @@ no dividing lines between parts — not around the silhouette and not inside it.
 Parts are separated only by flat color changes. No white border or sticker border
 (it is added later). The shapes touch the background directly.`,
 
-    `LIGHTING (very important, apply the same rule to every part):
-one single light source from the TOP-LEFT.
-Surfaces facing up or toward the upper-left use the LIGHT tone of that part's color.
-Surfaces facing the viewer use the BASE tone.
-Surfaces facing down or toward the right use the SHADOW tone.
-Shading is flat, hard-edged shapes following the object's form (like a cube's three faces,
-or a crescent on the lower-right of a round shape) — never gradients, never random blobs,
-never decorative patches that ignore the form. Every part of the object is lit from the same side. Keep it to one or two shade shapes per part;
-use the LIGHT tone sparingly (big top planes or one soft highlight), not on every little piece.`,
+    `TWO TONES ONLY (very important): every part uses exactly two flat tones of its color — the BASE
+tone, plus ONE shadow shape in the SHADOW tone on the side facing away from a single light at the TOP-LEFT
+(lower-right side of round things, right face of boxy things). No third tone, no mid-tones, no gradients.
+At most one small white highlight shape on the whole object (optional).`,
+
+    `NO RIMS, BEVELS OR REFLECTIONS: do not draw inner rings, rim bands, edge highlights, bevels,
+double borders, grooves, seams, reflections or glints. A lid is one flat shape, a mirror is one flat
+light-gray shape, a round container is one shape plus its shadow.`,
+
+    `COLOR BUDGET: the whole illustration uses at most ${Math.max(COLOR_BUDGET[simplify], ramps.length * 2 + 1)} distinct colors in total.`,
 
     `STYLE — CHUNKY, ROUND AND SOFT (most important after single object): ${SHAPE_BUDGET[simplify]}
 Every corner and every tip is generously rounded, like a soft vinyl toy or a cute puffy sticker.
@@ -224,18 +224,17 @@ tints of the palette — never in the background color.`,
 
     anchorCount
       ? `The ${anchorCount} attached style examples each show ONE illustration in exactly this style and
-lighting logic (top-left light, flat tones, no lines). Match their shading logic, but make your
-illustration at least as simple and as rounded as the simplest example. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
+lighting logic (top-left light, flat tones, no lines). Match their shading direction, but use FEWER
+tones and details than they do: two tones per part, no rims or bevels. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
       : null,
 
     ramps.length
-      ? `COLOR PALETTE (strict): use ONLY these exact colors. Each color comes as a 3-tone ramp;
-each part of the object uses one ramp and picks light/base/shadow by the lighting rule.
+      ? `COLOR PALETTE (strict): use ONLY these exact colors. Each color comes as a base + shadow pair;
+each part of the object uses one pair.
 ${paletteLines.join(" | ")}
-The attached swatch image shows these ramps (top row light, middle base, bottom shadow).
+The attached swatch image shows these pairs (top row base, bottom row shadow).
 No other hues. Small dark details (like eyes) may use the darkest shadow tone.`
-      : `COLOR PALETTE: a small, harmonious palette of 2-3 cheerful, saturated colors, each used as a
-3-tone ramp (light face / base / shadow face).`,
+      : `COLOR PALETTE: a small, harmonious palette of 2-3 cheerful colors, each used as base + shadow only.`,
 
     `BACKGROUND (critical for cut-out): a pure ${key.name} chroma-key screen, exactly ${key.hex},
 like a video green screen — perfectly flat and saturated edge to edge. Do NOT tint, darken, desaturate
@@ -281,7 +280,7 @@ module.exports = async function handler(req, res) {
       ? rawColors.filter((c) => typeof c === "string" && HEX_RE.test(c)).slice(0, MAX_COLORS)
       : [];
     const ramps = colors.map(makeRamp);
-    const palette = ramps.flatMap((r) => [r.light, r.base, r.shadow]);
+    const palette = ramps.flatMap((r) => [r.base, r.shadow]);
 
     const key = pickKeyColor(palette.concat(objectColors), typeof avoidKey === "string" ? avoidKey : null);
     const anchors = referenceImageBase64
@@ -298,7 +297,7 @@ module.exports = async function handler(req, res) {
       parts.push({ inlineData: a });
     });
     if (ramps.length) {
-      parts.push({ text: "Color ramp swatch (columns = colors in order, rows = light / base / shadow):" });
+      parts.push({ text: "Color swatch (columns = colors in order, top row = base, bottom row = shadow):" });
       parts.push({ inlineData: { mimeType: "image/png", data: makeRampSwatch(ramps) } });
     }
 
