@@ -36,8 +36,8 @@ function safeParseParams(s) {
 }
 
 function paramsOf(p) {
-  const { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly } = p
-  return { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly }
+  const { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly, simplify } = p
+  return { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly, simplify }
 }
 
 function position(node, size, index, total) {
@@ -150,6 +150,7 @@ figma.ui.onmessage = async (msg) => {
         outlineColor: msg.outlineColor || DEFAULTS.outlineColor,
         outlinePct: msg.outlinePct || DEFAULTS.outlinePct,
         singleOnly: msg.singleOnly !== false,
+        simplify: typeof msg.simplify === 'number' ? msg.simplify : DEFAULTS.simplify,
         mode: msg.type === 'vector-ready' ? 'vector' : 'png',
       }
       if (p.mode === 'vector') {
