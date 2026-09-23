@@ -183,14 +183,22 @@ Shading is flat, hard-edged shapes following the object's form (like a cube's th
 or a crescent on the lower-right of a round shape) — never gradients, never random blobs,
 never decorative patches that ignore the form. Every part of the object is lit from the same side.`,
 
-    `SIMPLICITY: reduce the subject to its 3 to 5 most essential, large, chunky shapes with rounded
-corners, simpler than an emoji. Leave out small details: no seeds, dots, stitches, textures,
-patterns, sparkles or tiny parts. No 3D rendering, no photorealism, no drop shadow, no cast shadow on the ground.`,
+    `SIMPLICITY: reduce the subject to its 3 to 6 most essential, large, chunky shapes with rounded
+corners, simpler than an emoji. No scattered small details inside shapes: no dots, specks, stitches,
+fine patterns, sparkles or tiny parts. No 3D rendering, no photorealism, no drop shadow, no cast shadow on the ground.`,
+
+    `MATERIAL TEXTURE THROUGH CONTOUR (important): when the material has a characteristic texture,
+show it ONLY through the outline shape of that part, never through small marks inside it.
+Examples: rice = a bumpy, lumpy edge along the rice shape; whipped cream = a few big rounded
+swirl lobes with one flat tone shape per lobe; lettuce = a wavy, ruffled edge; melted cheese = one
+drip shape; fur = a few chunky tufts on the silhouette edge. Keep these edge bumps large and few,
+so the shape still reads clearly at small sizes.`,
 
     anchorCount
       ? `The ${anchorCount} attached style examples each show ONE illustration in exactly this style and
-lighting logic (top-left light, three flat tones per color, no lines). Match their simplicity and
-shading logic. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
+lighting logic (top-left light, three flat tones per color, no lines, texture shown only through
+contour shapes like the rice edge or the cream swirls). Match their simplicity, shading logic and
+contour-based texture. Do NOT copy their subjects or colors, and draw only ONE ${subject}.`
       : null,
 
     ramps.length
