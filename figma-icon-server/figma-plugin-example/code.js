@@ -1,95 +1,170 @@
-// code.js (Figma 플러그인 메인 스레드)
-//
-// 전제조건: manifest.json 에 아래처럼 networkAccess 를 등록해야
-// 플러그인이 외부 서버(Vercel)로 fetch 요청을 보낼 수 있습니다.
-//
-// manifest.json 예시:
-// {
-//   "networkAccess": {
-//     "allowedDomains": ["https://YOUR-PROJECT.vercel.app"]
-//   }
-// }
+// code.js (Figma 플러그인 메인 스레드) — Sticker generator
+// PNG 모드: UI가 만든 투명 PNG를 이미지 fill로 배치
+// Vector 모드: UI가 만든 SVG를 figma.createNodeFromSvg로 넣어서 편집 가능한 레이어로 배치
+//   레이어: Border(흰 칼선) / Base / Colors(색마다 하나) / Outline(stroke)
 
-const SERVER_ENDPOINT = "https://YOUR-PROJECT.vercel.app/api/generate-icon";
+const TOOL_ID = 'run'
+const DISPLAY_NAME = 'Sticker generator'
+const PARAMS_KEY = TOOL_ID + ':params'
+const UI_WIDTH = 300
 
-/**
- * subject: 아이콘 이름 (예: "camera")
- * extraDetail: 추가 디테일 지시문 (선택)
- *
- * 참조 이미지는 서버에 고정 저장된 style-anchor.png가 자동으로 적용되므로
- * 여기서는 신경 쓸 필요가 없습니다. (특정 요청만 다른 스타일로 하고 싶으면
- * referenceImageBase64를 세 번째 인자로 넘기면 그때만 서버 기본값을 덮어씁니다.)
- */
-async function generateIcon(subject, extraDetail, referenceImageBase64) {
-  const res = await fetch(SERVER_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, extraDetail, referenceImageBase64 }),
-  });
+const DEFAULTS = { subject: '', extraDetail: '', stickerSize: 160, colors: [], outlineColor: '#252C46' }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `서버 오류 (${res.status})`);
-  }
+let last = null // { imageHash | svg, layerNames, subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly }
 
-  return res.json(); // { subject, mimeType, imageBase64, backgroundColor }
-}
-
-function base64ToUint8Array(base64) {
-  const binary = figma.base64Decode(base64);
-  return binary;
-}
-
-async function insertIconOnCanvas(subject, extraDetail, referenceImageBase64) {
-  figma.notify(`"${subject}" 아이콘 생성 중...`);
-
-  const { imageBase64, backgroundColor } = await generateIcon(
-    subject,
-    extraDetail,
-    referenceImageBase64
-  );
-
-  // 참고: 이 서버는 이미지를 backgroundColor(#FFFFFF 화이트) 배경으로 생성만 해줍니다.
-  // 배경 제거는 이 예시에 포함하지 않았습니다 — remove.bg의 Figma 플러그인처럼,
-  // 배경 제거 로직/API 호출을 이 플러그인 코드 안에 별도로 붙이는 걸 전제로 합니다.
-  // (예: 여기서 imageBase64를 배경 제거 함수/API에 먼저 통과시킨 뒤, 그 결과로
-  // figma.createImage()를 호출하면 됩니다.)
-
-  const bytes = base64ToUint8Array(imageBase64);
-  const image = figma.createImage(bytes);
-
-  const rect = figma.createRectangle();
-  rect.resize(256, 256);
-  rect.name = subject;
-  rect.fills = [
-    {
-      type: "IMAGE",
-      imageHash: image.hash,
-      scaleMode: "FILL",
-    },
-  ];
-
-  figma.currentPage.appendChild(rect);
-  figma.viewport.scrollAndZoomIntoView([rect]);
-  figma.notify(`"${subject}" 아이콘 생성 완료`);
-
-  return rect;
-}
-
-// UI(ui.html)에서 사용자가 이름을 입력하고 "생성" 버튼을 누르면
-// 아래처럼 메시지를 받아서 처리합니다.
-figma.ui.onmessage = async (msg) => {
-  if (msg.type === "generate-icon") {
-    try {
-      await insertIconOnCanvas(
-        msg.subject,
-        msg.extraDetail,
-        msg.referenceImageBase64
-      );
-    } catch (e) {
-      figma.notify(`오류: ${e.message}`, { error: true });
+function safeParseParams(s) {
+  try {
+    const obj = JSON.parse(s)
+    if (typeof obj?.subject !== 'string') return null
+    const size = obj.stickerSize
+    if (typeof size !== 'number' || size < 32 || size > 512) return null
+    return {
+      subject: obj.subject,
+      extraDetail: typeof obj.extraDetail === 'string' ? obj.extraDetail : '',
+      stickerSize: size,
+      colors: Array.isArray(obj.colors)
+        ? obj.colors.filter((c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)).slice(0, 4)
+        : [],
+      outlineColor:
+        typeof obj.outlineColor === 'string' && /^#[0-9a-f]{6}$/i.test(obj.outlineColor)
+          ? obj.outlineColor
+          : DEFAULTS.outlineColor,
     }
+  } catch {
+    return null
   }
-};
+}
 
-figma.showUI(__html__, { width: 320, height: 240 });
+function paramsOf(p) {
+  const { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly } = p
+  return { subject, extraDetail, stickerSize, colors, outlineColor, outlinePct, mode, singleOnly }
+}
+
+function position(node, size, index, total) {
+  const gap = 16
+  const center = figma.viewport.center
+  const totalWidth = total * size + (total - 1) * gap
+  node.x = Math.round(center.x - totalWidth / 2 + index * (size + gap))
+  node.y = Math.round(center.y - size / 2)
+}
+
+function tag(node, p) {
+  node.setRelaunchData({ [TOOL_ID]: DISPLAY_NAME })
+  node.setPluginData(PARAMS_KEY, JSON.stringify(paramsOf(p)))
+}
+
+function placeRaster(p, index, total) {
+  const size = p.stickerSize
+  const frame = figma.createFrame()
+  frame.name = 'Sticker / ' + p.subject
+  frame.resize(size, size)
+  frame.clipsContent = false
+  frame.fills = [{ type: 'IMAGE', imageHash: p.imageHash, scaleMode: 'FIT' }]
+  position(frame, size, index, total)
+  tag(frame, p)
+  return frame
+}
+
+function placeVector(p, index, total) {
+  const size = p.stickerSize
+  const frame = figma.createNodeFromSvg(p.svg)
+  frame.name = 'Sticker / ' + p.subject
+  frame.fills = []
+  frame.clipsContent = false
+
+  // SVG를 그린 순서 = 벡터 노드 순서 → UI가 보낸 이름을 순서대로 붙임
+  const names = p.layerNames || []
+  const vectors = frame.findAll((n) => n.type === 'VECTOR')
+  vectors.forEach((v, i) => { if (names[i]) v.name = names[i] })
+  vectors.forEach((v) => {
+    if (/^(Color |#)/.test(v.name) && v.parent && v.parent.type === 'GROUP') v.parent.name = 'Colors'
+  })
+  frame.rescale(size / frame.width) // stroke 두께까지 같이 스케일
+  position(frame, size, index, total)
+  tag(frame, p)
+  return frame
+}
+
+function place(p, index, total) {
+  return p.mode === 'vector' ? placeVector(p, index, total) : placeRaster(p, index, total)
+}
+
+const sel = figma.currentPage.selection
+const stored = sel.length === 1 ? safeParseParams(sel[0].getPluginData(PARAMS_KEY)) : null
+
+figma.root.setRelaunchData({ [TOOL_ID]: DISPLAY_NAME })
+figma.showUI(__html__, { width: UI_WIDTH, height: 560, themeColors: true })
+
+if (stored) {
+  figma.ui.postMessage({ type: 'params-change', params: stored })
+}
+
+const placedThisRun = []
+
+figma.ui.onmessage = async (msg) => {
+  if (msg.type === 'resize') {
+    figma.ui.resize(UI_WIDTH, Math.max(200, Math.min(900, Math.round(msg.height))))
+    return
+  }
+
+  if (msg.type === 'notify') {
+    figma.notify(msg.message, { error: !!msg.error })
+    return
+  }
+
+  if (msg.type === 'generate-start') {
+    placedThisRun.length = 0
+    return
+  }
+
+  if (msg.type === 'generate-done') {
+    if (placedThisRun.length) {
+      figma.viewport.scrollAndZoomIntoView(placedThisRun)
+      figma.notify(
+        '스티커 ' + placedThisRun.length + '개를 만들었어요' +
+        (msg.failed ? ' (' + msg.failed + '개 실패)' : '')
+      )
+    }
+    return
+  }
+
+  if (msg.type === 'place-again') {
+    if (!last) {
+      figma.notify('아직 생성한 스티커가 없어요', { error: true })
+      return
+    }
+    const frame = place(last, 0, 1)
+    figma.currentPage.selection = [frame]
+    figma.viewport.scrollAndZoomIntoView([frame])
+    figma.notify('스티커를 다시 배치했어요')
+    return
+  }
+
+  if (msg.type === 'image-ready' || msg.type === 'vector-ready') {
+    try {
+      const p = {
+        subject: msg.subject,
+        extraDetail: msg.extraDetail || '',
+        stickerSize: msg.stickerSize,
+        colors: msg.colors || [],
+        outlineColor: msg.outlineColor || DEFAULTS.outlineColor,
+        outlinePct: msg.outlinePct || DEFAULTS.outlinePct,
+        singleOnly: msg.singleOnly !== false,
+        mode: msg.type === 'vector-ready' ? 'vector' : 'png',
+      }
+      if (p.mode === 'vector') {
+        p.svg = msg.svg
+        p.layerNames = msg.layerNames || []
+      } else {
+        p.imageHash = figma.createImage(new Uint8Array(msg.bytes)).hash
+      }
+      last = p
+      const frame = place(p, msg.index || 0, msg.total || 1)
+      placedThisRun.push(frame)
+      figma.currentPage.selection = placedThisRun.slice()
+    } catch (error) {
+      figma.notify(error instanceof Error ? error.message : String(error), { error: true })
+    }
+    figma.ui.postMessage({ type: 'generation-complete' })
+  }
+}
