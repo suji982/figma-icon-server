@@ -140,6 +140,23 @@ figma.ui.onmessage = async (msg) => {
     return
   }
 
+  // 디버그: 모델이 준 원본(키 컬러 배경 그대로)을 스티커 아래에 배치
+  if (msg.type === 'raw-ready') {
+    try {
+      const size = msg.stickerSize
+      const frame = figma.createFrame()
+      frame.name = 'Raw / ' + msg.subject
+      frame.resize(size, size)
+      frame.fills = [{ type: 'IMAGE', imageHash: figma.createImage(new Uint8Array(msg.bytes)).hash, scaleMode: 'FIT' }]
+      position(frame, size, msg.index || 0, msg.total || 1)
+      frame.y += size + 40
+      placedThisRun.push(frame)
+    } catch (error) {
+      figma.notify(error instanceof Error ? error.message : String(error), { error: true })
+    }
+    return
+  }
+
   if (msg.type === 'image-ready' || msg.type === 'vector-ready') {
     try {
       const p = {
